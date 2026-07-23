@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>Cashew Plant Distribution - Data Collection</title>
+
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    background: #f5f5f0;
+    color: #2c2c2c;
+    padding-bottom: 40px;
+  }
+  header {
+    background: #2e7d32;
+    color: white;
+    padding: 18px 16px;
+    text-align: center;
+  }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: 0.9; }
+
+  #status-bar {
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .online  { background: #e8f5e9; color: #1b5e20; }
+  .offline { background: #fff3e0; color: #e65100; }
+
+  form {
+    max-width: 480px;
+    margin: 16px auto;
+    padding: 0 16px;
+  }
+
+  label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    margin: 16px 0 6px;
+    color: #444;
+  }
+  input, textarea {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    background: white;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+
+  .required::after { content: " *"; color: #c62828; }
+
+  #gpsBox {
+    margin-top: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    background: #e8f5e9;
+    font-size: 13px;
+    color: #1b5e20;
+    display: none;
+  }
+  #gpsBox.pending { background: #fff3e0; color: #e65100; }
+
+  button {
+    width: 100%;
+    padding: 14px;
+    font-size: 16px;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+  #gpsBtn { background: #1565c0; color: white; }
+  #gpsBtn:disabled { background: #90a4ae; }
+  #saveBtn { background: #2e7d32; color: white; }
+  #saveBtn:disabled { background: #90a4ae; }
+
+  #msg {
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    display: none;
+  }
+  .msg-success { background: #e8f5e9; color: #1b5e20; }
+  .msg-pending { background: #fff3e0; color: #e65100; }
+  .msg-error   { background: #ffebee; color: #b71c1c; }
+
+  #counter {
+    max-width: 480px;
+    margin: 0 auto 10px;
+    padding: 0 16px;
+    font-size: 12px;
+    color: #777;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🌰 Cashew Plant Distribution</h1>
+  <p>Field Data Collection Form</p>
+</header>
+
+<div id="status-bar" class="online">🟢 Online — records sync instantly</div>
+<div id="counter">Pending sync: <span id="pendingCount">0</span></div>
+
+<form id="dataForm" onsubmit="return false;">
+
+  <label class="required">Farmer Name</label>
+  <input type="text" id="farmerName" required />
+
+  <label class="required">National ID</label>
+  <input type="text" id="nationalId" required />
+
+  <label class="required">Number of Cashew Plants Given</label>
+  <input type="number" id="plantCount" min="1" required />
+
+  <label>Contact Number</label>
+  <input type="tel" id="contactNumber" />
+
+  <label>Notes / Location Description</label>
+  <textarea id="notes" placeholder="e.g. near village temple, plot behind house"></textarea>
+
+  <label class="required">Farm GPS Location</label>
+  <button type="button" id="gpsBtn" onclick="captureGPS()">📍 Capture GPS Location</button>
+  <div id="gpsBox"></div>
+
+  <button type="button" id="saveBtn" onclick="saveRecord()">💾 Save Record</button>
+  <div id="msg"></div>
+
+</form>
+
+<!-- ============================================================
+     Firebase SDK (compat version - simplest for non-developers)
+     ============================================================ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+<script>
+// ============================================================
+// STEP 1: PASTE YOUR FIREBASE CONFIG HERE
+// You'll get this from the Firebase Console when you create
+// your project (instructions provided separately).
+// ============================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyCbwCbI-1AX7R0aQmMfaTemnkoUtIfGCbU",
+  authDomain: "cashew-distribution.firebaseapp.com",
+  projectId: "cashew-distribution",
+  storageBucket: "cashew-distribution.firebasestorage.app",
+  messagingSenderId: "441564386687",
+  appId: "1:441564386687:web:746433b25e1fc86656b64a",
+  measurementId: "G-V39NSS26FK"
+};
+// ============================================================
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// Enable offline persistence — this is what lets the form work
+// with no internet signal, queuing saves locally until back online.
+db.enablePersistence({ synchronizeTabs: true }).catch((err) => {
+  console.warn("Offline persistence not enabled:", err.code);
+});
+
+const COLLECTION_NAME = "cashew_distributions";
+
+let capturedLocation = null;
+
+// ---- GPS capture ----
+function captureGPS() {
+  const btn = document.getElementById('gpsBtn');
+  const box = document.getElementById('gpsBox');
+
+  if (!navigator.geolocation) {
+    box.style.display = 'block';
+    box.className = 'pending';
+    box.textContent = 'GPS not supported on this browser.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '📍 Locating...';
+  box.style.display = 'block';
+  box.className = 'pending';
+  box.textContent = 'Getting your location...';
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      btn.disabled = false;
+      btn.textContent = '📍 Re-capture GPS Location';
+
+      capturedLocation = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy
+      };
+
+      box.className = '';
+      box.style.display = 'block';
+      box.textContent = `✅ Location captured — Lat: ${capturedLocation.lat.toFixed(6)}, Lng: ${capturedLocation.lng.toFixed(6)} (accuracy ±${Math.round(capturedLocation.accuracy)}m)`;
+    },
+    (err) => {
+      btn.disabled = false;
+      btn.textContent = '📍 Capture GPS Location';
+      box.className = 'pending';
+      box.style.display = 'block';
+      let msg = 'Could not get location. ';
+      if (err.code === 1) msg += 'Please allow location permission.';
+      else if (err.code === 2) msg += 'No GPS signal — move outdoors and try again.';
+      else msg += 'Please try again.';
+      box.textContent = msg;
+    },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+  );
+}
+
+// ---- Save record ----
+function saveRecord() {
+  const name = document.getElementById('farmerName').value.trim();
+  const id = document.getElementById('nationalId').value.trim();
+  const plantCount = document.getElementById('plantCount').value;
+  const contact = document.getElementById('contactNumber').value.trim();
+  const notes = document.getElementById('notes').value.trim();
+  const msg = document.getElementById('msg');
+  const saveBtn = document.getElementById('saveBtn');
+
+  if (!name || !id || !plantCount) {
+    showMsg('msg-error', 'Please fill in Farmer Name, National ID, and Number of Plants.');
+    return;
+  }
+  if (!capturedLocation) {
+    showMsg('msg-error', 'Please capture GPS location before saving.');
+    return;
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.textContent = '💾 Saving...';
+
+  const record = {
+    farmerName: name,
+    nationalId: id,
+    plantCount: Number(plantCount),
+    contactNumber: contact || null,
+    notes: notes || null,
+    latitude: capturedLocation.lat,
+    longitude: capturedLocation.lng,
+    gpsAccuracyMeters: Math.round(capturedLocation.accuracy),
+    submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  db.collection(COLLECTION_NAME).add(record)
+    .then(() => {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Save Record';
+      showMsg('msg-success', navigator.onLine
+        ? '✅ Record saved and synced successfully!'
+        : '📥 Record saved locally — will sync automatically once you have signal.');
+      resetForm();
+    })
+    .catch((err) => {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 Save Record';
+      showMsg('msg-error', 'Error saving record: ' + err.message);
+    });
+}
+
+function resetForm() {
+  document.getElementById('farmerName').value = '';
+  document.getElementById('nationalId').value = '';
+  document.getElementById('plantCount').value = '';
+  document.getElementById('contactNumber').value = '';
+  document.getElementById('notes').value = '';
+  capturedLocation = null;
+  const box = document.getElementById('gpsBox');
+  box.style.display = 'none';
+  document.getElementById('gpsBtn').textContent = '📍 Capture GPS Location';
+}
+
+function showMsg(cls, text) {
+  const msg = document.getElementById('msg');
+  msg.className = cls;
+  msg.style.display = 'block';
+  msg.textContent = text;
+  setTimeout(() => { msg.style.display = 'none'; }, 6000);
+}
+
+// ---- Online/offline status ----
+function updateStatusBar() {
+  const bar = document.getElementById('status-bar');
+  if (navigator.onLine) {
+    bar.className = 'online';
+    bar.textContent = '🟢 Online — records sync instantly';
+  } else {
+    bar.className = 'offline';
+    bar.textContent = '🟠 Offline — records will save locally and sync later';
+  }
+}
+window.addEventListener('online', updateStatusBar);
+window.addEventListener('offline', updateStatusBar);
+updateStatusBar();
+
+// ---- Track pending (unsynced) records ----
+db.collection(COLLECTION_NAME)
+  .where('submittedAt', '==', null)
+  .onSnapshot(
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      const pending = snapshot.docs.filter(d => d.metadata.hasPendingWrites).length;
+      document.getElementById('pendingCount').textContent = pending;
+    },
+    () => {} // ignore errors from this optional indicator
+  );
+</script>
+
+</body>
+</html>
