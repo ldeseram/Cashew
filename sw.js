@@ -4,7 +4,7 @@
 
 const CACHE_NAME = 'cashew-app-v1';
 const FILES_TO_CACHE = [
-  './data_collector.html',
+  './data_collector_pwa.html',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
