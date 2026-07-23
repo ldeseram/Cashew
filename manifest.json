@@ -2,7 +2,7 @@
   "name": "Cashew Plant Distribution",
   "short_name": "Cashew Data",
   "description": "Field data collection for cashew plant distribution to farmers",
-  "start_url": "./data_collector.html",
+  "start_url": "./data_collector_pwa.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f5f5f0",
